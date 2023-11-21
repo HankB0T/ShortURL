@@ -1,36 +1,86 @@
-const express = require('express')
-const mongoose = require('mongoose')
-const ShortUrl = require('./models/shortUrl')
-const app = express()
+// app.js
+const express = require('express');
+const mongoose = require('mongoose');
+const bodyParser = require('body-parser');
 
-mongoose.connect('mongodb://localhost/urlShortener', {
-  useNewUrlParser: true, useUnifiedTopology: true
-})
+const app = express();
 
-app.use(express.static(__dirname + '/public'))
+// Connect to MongoDB
+mongoose.connect('mongodb://localhost/url-shortener', { useNewUrlParser: true, useUnifiedTopology: true });
 
-app.set('view engine', 'ejs')
-app.use(express.urlencoded({ extended: false }))
+// Set up middleware
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static('public'));
+app.set('view engine', 'ejs');
 
+// Define URL model
+const urlSchema = new mongoose.Schema({
+  originalUrl: String,
+  shortUrl: String
+});
+
+const Url = mongoose.model('Url', urlSchema);
+
+// Set up routes
 app.get('/', async (req, res) => {
-  const shortUrls = await ShortUrl.find()
-  res.render('index', { shortUrls: shortUrls })
-})
+  const originalUrl = req.body.url;
+  let url = await Url.findOne({ originalUrl });
+  const shortenedUrl = url === null? "" : url.shortUrl; 
+  const urls = await Url.find();
+  res.render('index', { shortenedUrl: "", urls });
+});
 
-app.post('/shortUrls', async (req, res) => {
-  await ShortUrl.create({ full: req.body.fullUrl })
-
-  res.redirect('/')
-})
-
+// Add more routes here
 app.get('/:shortUrl', async (req, res) => {
-  const shortUrl = await ShortUrl.findOne({ short: req.params.shortUrl })
-  if (shortUrl == null) return res.sendStatus(404)
+  const shortUrl = req.params.shortUrl;
+  const url = await Url.findOne({ shortUrl });
 
-  shortUrl.clicks++
-  shortUrl.save()
+  if (url) {
+    res.redirect(url.originalUrl);
+  } else {
+    res.status(404).send('URL not found');
+  }
+});
 
-  res.redirect(shortUrl.full)
-})
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 
-app.listen(process.env.PORT || 5000);
+app.post('/', async (req, res) => {
+  const originalUrl = req.body.url;
+  let url = await Url.findOne({ originalUrl });
+
+ if (!url) {
+   const shortUrl = generateShortUrl();
+   
+   // Check the number of entries in the database
+   const count = await Url.countDocuments();
+   
+   if (count >= 3) {
+     // If there are 10 or more entries, delete the oldest entry
+     await Url.findOneAndDelete({}, { sort: { createdAt: 1 } });
+   }
+
+   url = new Url({ originalUrl, shortUrl });
+   await url.save();
+ }
+
+
+  const urls = await Url.find();
+  res.render('index', { shortenedUrl: url.shortUrl, urls }); // Ensure 'shortenedUrl' is passed to the template
+});
+
+
+function generateShortUrl() {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const shortUrlLength = 6;
+  let shortUrl = '';
+
+  for (let i = 0; i < shortUrlLength; i++) {
+    const randomIndex = Math.floor(Math.random() * characters.length);
+    shortUrl += characters[randomIndex];
+  }
+
+  return shortUrl;
+}
